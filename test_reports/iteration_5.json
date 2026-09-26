@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 5: Real LLM engine (Bynara router) integration validated end-to-end. Backend pytest 14/14 pass (9 iteration-4 webhook simulator + 5 new LLM integration tests). LLM parse via /api/v1/webhook/whatsapp returns engine=llm, model=agnes-2.5-flash, ORDER_CREATION intent with correct SKU mapping (BTK-KRS-01 x2 for 'saya mau pesan 2 batik keris tulis') and Indonesian reasoning; confidence within [0,1]; llmEnabled=true in response envelope. General query 'halo kak, toko buka jam berapa?' returns typed 409 ORDER_NOT_PARSED with reasoning citing GENERAL_QUERY (no 500). Approve appends LLM-drafted Indonesian polite reply, deducts stock (BTK-KRS-01 12->11); reject appends empathetic LLM reply mentioning stock/cream reason. Fallback path (monkeypatched LLMFailure) exercised: _analyze_text returns engine='rule_based', model=None using rule-based parse_order_text. Frontend UI: Simulator drawer -> free-chat send -> new order auto-selected in decision card; AI Insight panel visible with data-testid order-ai-insight[data-engine=llm], badge='AI Parsed', confidence '97%', model 'agnes-2.5-flash', extracted 'ORDER_CREATION · Kebaya Encim Bordir × 1', reasoning in Indonesian. Approve produced 'AI Draft · agnes-2.5-flash' bot bubble ('Terima kasih...'); reject produced 'Kami mohon maaf, Kak TEST_UI_Reject... stok warna cream sedang kosong...'. Audit log shows AI_PARSE_MESSAGE raw_text -> llm:agnes-2.5-flash and NOTIFY_CUSTOMER llm:agnes-2.5-flash -> sent. antislop-check.sh exits 0.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Reject after simulator send", "issue": "Simulator drawer close button click via force=True occasionally does not dismiss the drawer; Escape key works. Not a functional bug (user can click X or press Esc), but test script needed workaround.", "affected_selectors": ["wa-simulator-close-button"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_llm_integration.py",
+    "/app/backend/tests/test_webhook_simulator.py",
+    "/app/test_reports/pytest/llm_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "llm_engine._call_model catches TimeoutException and HTTPError separately with typed LLMFailure — clean Result pattern; no bare except.",
+    "server._analyze_text falls back to rule-based parse_order_text on LLMFailure and returns typed 409 ORDER_NOT_PARSED for GENERAL_QUERY — matches spec (no crash on LLM timeout/rate-limit).",
+    "aiInsight persisted in orders.ai_json and echoed via order_row_to_dto; AiInsightPanel handles both engine='llm' and engine='rule_based' variants with distinct testids.",
+    "Model iteration: primary agnes-2.5-flash consistently succeeded in tests; longcat-2.5 fallback path not organically exercised (would need provoked 429/timeout). Fallback code path is symmetric so risk is low.",
+    "Prompt correctly injects live catalog with SKU/name/price/stock; LLM confidently returned SKU BTK-KRS-01 / KBY-ENC-03 with 95-97% confidence.",
+    "Minor: /api/v1/webhook/whatsapp GENERAL_QUERY response does not include ok:false field (only code, message, context). Not a bug but slight inconsistency vs success envelope {ok:true,...}."
+  ],
+  "updated_files": ["/app/backend/tests/test_llm_integration.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Fixture calls POST /api/v1/demo/reset before each test and again on teardown; DB left at seed state (6 orders, BTK-KRS-01=12, KBY-ENC-03=2).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "BYNARA_API_KEY is live in /app/backend/.env; do NOT remove permanently. LLM parse/draft calls take 5-15s each; use timeouts >=60s. Tests in /app/backend/tests/test_llm_integration.py cover parse+approve+reject+GENERAL_QUERY+fallback. UI testids under APPROVAL constants (approval.js) and SIMULATOR (simulator.js). Simulator drawer close via ESC is more reliable than close-button click in Playwright."
+}

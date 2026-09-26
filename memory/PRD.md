@@ -33,6 +33,12 @@ Clone repo https://github.com/WajbihMasir/tuntas-lagi and wire the existing HITL
 - Removed template `frontend/jsconfig.json` (conflicted with repo tsconfig)
 - Testing iteration_4: backend 9/9, frontend flows 100%; antislop-check exit 0
 
+## Iteration 5 — Real LLM Engine (2026-06)
+- Deployed repo commit 6484ffb (llm_engine.py) into sandbox; configured `BYNARA_API_KEY`, `BYNARA_BASE_URL`, `LLM_PRIMARY_MODEL=agnes-2.5-flash`, `LLM_FALLBACK_MODEL=longcat-2.5` in backend/.env
+- Webhook parse via LLM structured JSON (catalog in system prompt) → `aiInsight`; approve/reject → LLM-drafted Indonesian reply; fallback to rule-based / static template on any LLMFailure
+- GoldCard AiInsightPanel: "AI Parsed · Confidence %", model, reasoning
+- Testing iteration_5: backend 14/14, frontend 100%; antislop-check exit 0
+
 ## Backlog
 - P1: Realtime push via SSE/websocket instead of 6s polling
 - P1: Edit action on draft order (qty/price) before approve
