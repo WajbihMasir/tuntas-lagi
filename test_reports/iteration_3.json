@@ -1,0 +1,35 @@
+{
+  "summary": "Full backend + frontend smoke pass for HITL Approval Queue iteration 3. All 15 backend behaviors validated (health, state, inventory, orders, approve happy/error paths, reject validation, webhook create/invalid-SKU, typed 409 failures, persistence across supervisor restart). Frontend end-to-end verified: approval-page loads, OrderDecisionCard renders, INSUFFICIENT_STOCK failure alert surfaces with typed code, reject flow (form + preset + confirm) works and DITOLAK marker + bot reject message + audit entries appear. Inventory panel reflects stock deductions (SRG-TNN-04 5->4 after approve).",
+  "tested_scope": ["backend", "frontend", "integration"],
+  "passed": [
+    "GET /api/health returns ok with orders count",
+    "GET /api/v1/state returns inventory[5], orders[7+], audit[] with correct camelCase keys (customerAlias, rejectReason, totalPrice, receivedAt, orderId in audit)",
+    "GET /api/v1/inventory returns 5 items with sku/name/price/stock",
+    "POST /api/v1/orders/ORD-2406-004/approve: status->approved, 3 audit entries (APPROVE_ORDER human, DEDUCT_STOCK agent, NOTIFY_CUSTOMER agent), bot message appended, SRG-TNN-04 stock 5->4",
+    "POST approve on ORD-2406-001 (already approved) -> 409 ORDER_NOT_PENDING",
+    "POST approve on ORD-NOPE -> 409 ORDER_NOT_FOUND",
+    "POST reject with reason<5 chars -> 422 pydantic validation error",
+    "POST reject ORD-2406-003 with valid reason -> status=rejected, rejectReason stored, 3 messages",
+    "POST /api/v1/webhook/whatsapp creates ORD-2609-009 (status pending_approval, 2 seed messages, INBOUND_MESSAGE audit)",
+    "POST webhook with invalid SKU -> 409 PRODUCT_NOT_FOUND",
+    "POST approve ORD-2609-009 (99x KBY-ENC-03, stock 2) -> 409 INSUFFICIENT_STOCK with context {operation:check_stock, order_id, sku}",
+    "Persistence: after `sudo supervisorctl restart backend`, ORD-2406-004 remains approved, SRG-TNN-04 stock remains 4, audit preserved",
+    "Frontend: approval-page loads at REACT_APP_BACKEND_URL, 9 queue items rendered",
+    "Frontend: order-failure-alert shows INSUFFICIENT_STOCK code + message for ORD-2609-009",
+    "Frontend reject flow: reject-reason-form -> reject-preset-reason-0 -> reject-confirm-button transitions ORD-2609-008 to DITOLAK, appends bot rejection message, updates audit log panel, decreases pending count 3->2"
+  ],
+  "failed": [
+    {
+      "area": "frontend testid casing",
+      "issue": "queue-item testids are lowercased (e.g. `queue-item-ord-2609-008`) while spec/docs referenced upper-case order IDs (`queue-item-ORD-2609-008`). Selectors still work if callers use lowercase.",
+      "evidence": "page.evaluate returned ['queue-item-ord-2609-009', 'queue-item-ord-2609-008', ...]",
+      "priority": "LOW"
+    }
+  ],
+  "action_items": [
+    "Optional: normalise queue-item data-testid casing to match order id casing (e.g. `queue-item-ORD-2609-008`) for consistency with other testid constants; or update docs to reflect lowercase."
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true
+}

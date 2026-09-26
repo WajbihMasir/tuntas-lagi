@@ -1,0 +1,62 @@
+---
+description: TuntasUMKM frontend anti-visual-slop rules (brand tokens, semantic HTML, no derived-state effects)
+globs: **/*.tsx, **/*.jsx, src/components/**
+alwaysApply: false
+---
+
+# TuntasUMKM — Frontend Anti-Slop Rules
+
+Tagline: "Dari Percakapan, Jadi Penjualan."
+Gold standard komponen: `@src/components/ui/gold-card.tsx` — tiru struktur, token, dan pola state-nya.
+
+## 1. DILARANG Visual Slop
+- DILARANG gradient purple-to-indigo acak (`from-purple-*`, `via-purple-*`, `to-indigo-*`, `from-indigo-*`, `from-violet-*`).
+- DILARANG Pill Badge kapsul melayang di atas Hero ("BETA", "New", "Trusted By", `rounded-full` + label kecil di atas H1).
+- DILARANG 3-Card Grid simetris repetitif (`grid-cols-3` berisi 3 kartu identik). Gunakan Bento Grid / layout asimetris (`col-span` bervariasi, hierarki visual jelas).
+- DILARANG membungkus setiap teks dalam `<Card>` dengan `border-gray-200`. Gunakan whitespace, tipografi, dan rail aksen brand untuk memisahkan konten.
+- DILARANG emoji sebagai ikon. Gunakan `lucide-react`.
+- DILARANG `transition-all`. Tulis properti spesifik: `transition-[transform,box-shadow]`.
+
+## 2. WAJIB Brand Tokens TuntasUMKM
+Warna hanya melalui Tailwind design tokens (didefinisikan di `tailwind.config.js` + `src/index.css`):
+
+| Token | Hex | Makna |
+|---|---|---|
+| `brand-navy` | #0F2D6B | Primary — Trust, Stabilitas |
+| `brand-blue` | #2563EB | Accent — Teknologi, Keandalan |
+| `brand-green` | #10B981 | Success — Aksi, Pertumbuhan |
+| `brand-mist` | #F1F5F9 | Pendukung — permukaan netral |
+| `brand-sky` | #DBEAFE | Pendukung — highlight info |
+| `brand-mint` | #D1FAE5 | Pendukung — highlight sukses |
+| `brand-peach` | #FDBA8C | Pendukung — perhatian hangat |
+
+- DILARANG hex/rgb literal di className (`bg-[#0F2D6B]`) atau style inline. Pakai `bg-brand-navy`, `text-brand-blue/70`, dst.
+- Konstanta brand (nama, tagline, hex untuk non-CSS) diambil dari `@/constants/brand`.
+- Shadow brand: `shadow-brand-rest`, `shadow-brand-lift`.
+
+## 3. WAJIB HTML5 Semantik — Dilarang Div-Soup
+- Gunakan `<main>`, `<section>`, `<article>`, `<header>`, `<footer>`, `<nav>`, `<aside>`, `<ul>/<li>`.
+- Elemen klik WAJIB `<button type="button">` atau `<a href>`. DILARANG `<div onClick>`.
+- State error pakai `role="alert"`; loading pakai `aria-busy`; update real-time pakai `aria-live="polite"`.
+- Setiap elemen interaktif & info kritikal WAJIB punya `data-testid` kebab-case yang unik.
+
+## 4. React Hygiene
+- DILARANG `useEffect` untuk derived state. Hitung langsung saat render (atau `useMemo` jika mahal).
+
+```tsx
+// SALAH
+const [total, setTotal] = useState(0);
+useEffect(() => setTotal(items.reduce((s, i) => s + i.subtotal, 0)), [items]);
+
+// BENAR
+const total = items.reduce((s, i) => s + i.subtotal, 0);
+```
+
+- Penggabungan class WAJIB via `cn()` dari `@/lib/utils`; komponen menerima `className`.
+- Komponen ≤ 50 baris; pecah menjadi sub-komponen.
+- State async WAJIB dimodelkan sebagai discriminated union (`loading | empty | error | success`), bukan kumpulan boolean.
+
+## 5. HITL / Approval Queue UX
+- Setiap draft transaksional menampilkan status approval (`pending_approval | approved | rejected`) secara eksplisit.
+- Aksi Approve / Edit / Reject selalu terlihat, tidak tersembunyi di menu.
+- Micro-interaction terukur: 150–200ms, `ease-out`, hormati `motion-reduce`.

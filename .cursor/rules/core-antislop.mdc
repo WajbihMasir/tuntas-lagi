@@ -1,0 +1,72 @@
+---
+description: TuntasUMKM core anti-AI-slop rules (type safety, typed failures, idempotent tools, no monoliths)
+globs: **/*.ts, **/*.py, **/*.js
+alwaysApply: true
+---
+
+# TuntasUMKM — Core Anti-Slop Rules
+
+Konteks produk: AI Agent operasional UMKM ("Dari Percakapan, Jadi Penjualan.").
+Nilai kunci: Human-In-The-Loop (HITL) approval, efisiensi operasional, keandalan real-time.
+Setiap aturan di bawah bersifat WAJIB. Pelanggaran = PR ditolak.
+
+## 1. Type Safety — tanpa bypass
+- DILARANG: `as any`, `: any`, `@ts-ignore`, `@ts-nocheck`, `@ts-expect-error` tanpa tiket, `# type: ignore` di Python.
+- DILARANG cast paksa (`as unknown as T`) untuk data dari luar (HTTP body, LLM output, DB, env).
+- WAJIB validasi di boundary: Zod (TS/JS) atau Pydantic (Python). Tipe diturunkan dari schema, bukan ditulis ulang.
+- `as const` DIPERBOLEHKAN (literal narrowing, bukan bypass).
+
+```ts
+// BENAR
+const OrderItem = z.object({ product: z.string().min(1), quantity: z.number().int().positive() });
+type OrderItem = z.infer<typeof OrderItem>;
+const parsed = OrderItem.safeParse(input);
+
+// SALAH
+const item = input as any;
+```
+
+## 2. Typed Failures / Result Pattern — tanpa silent swallow
+- DILARANG: `catch (e) { return null; }`, `catch {}` kosong, `except Exception: pass`, `except: return None`.
+- WAJIB: kembalikan Result bertipe atau lempar error domain yang diberi nama.
+- Setiap failure membawa `code` (SCREAMING_SNAKE), `message` (manusiawi), `context` (operation, id terkait, idempotency_key), dan `cause` asli.
+
+```ts
+type Result<T, E extends { code: string }> = { ok: true; value: T } | { ok: false; error: E };
+```
+
+```python
+class StockFailure(BaseModel):
+    code: Literal["PRODUCT_NOT_FOUND", "INSUFFICIENT_STOCK", "STOCK_TIMEOUT"]
+    message: str
+    context: dict[str, str]
+
+Result = Ok[StockLevel] | Err[StockFailure]
+```
+
+## 3. Komentar — hanya "mengapa", bukan "apa"
+- DILARANG komentar naratif redundant: `// increment x` di atas `x++`, `# loop through items`.
+- Komentar hanya untuk alasan bisnis/keputusan non-obvious, maksimal satu baris.
+
+## 4. Ukuran fungsi
+- DILARANG fungsi/komponen > 50 baris. Pecah per tanggung jawab (parse → validate → execute → map).
+- Satu fungsi = satu level abstraksi.
+
+## 5. Search Before Create
+- SEBELUM membuat helper baru, WAJIB pindai: `@src/utils/`, `@src/common/`, `@src/lib/`, `@src/hooks/`, `@src/constants/` (frontend) dan modul utilitas backend.
+- Jika fungsi serupa ada: gunakan atau perluas. Duplikasi helper (mis. `formatRupiah` kedua) = ditolak.
+- Contoh: penggabungan class Tailwind WAJIB via `cn()` di `@/lib/utils`.
+
+## 6. Tool Calls Agent (`check_stock`, `calc_total`, `create_draft_order`, `generate_invoice_draft`, `get_store_policy`)
+- Input & output setiap tool WAJIB divalidasi schema (Zod/Pydantic).
+- Setiap tool WAJIB punya penanganan error eksplisit → Result bertipe (mis. `PRODUCT_NOT_FOUND`, `INSUFFICIENT_STOCK`, `TOOL_TIMEOUT`).
+- Tool yang mengubah state WAJIB idempotent: terima `idempotency_key`, cek dulu sebelum menulis, kembalikan hasil sebelumnya jika key sudah ada.
+- Timeout 30 detik, retry maks 2x dengan exponential backoff, hanya untuk error yang retryable.
+- DILARANG mengarang harga/stok: `check_stock()` adalah satu-satunya sumber kebenaran stok.
+- Aksi transaksional (kurangi stok, kirim invoice, balasan berisi janji) WAJIB melewati HITL approval gate.
+- Setiap state transition dicatat di audit log: timestamp, actor (`agent` | `human`), action, before/after.
+
+## 7. Data & Waktu
+- Data pelanggan WAJIB sintetis (UU PDP). Jangan log PII.
+- Python: `datetime.now(timezone.utc)`, bukan `datetime.utcnow()`.
+- Semua URL/kredensial dari environment variable, tanpa default hardcoded.
