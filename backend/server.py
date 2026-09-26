@@ -257,9 +257,10 @@ SCHEMA = [
 
 
 async def get_db() -> aiosqlite.Connection:
-    conn = await aiosqlite.connect(DB_PATH)
+    conn = await aiosqlite.connect(DB_PATH, timeout=15)
     conn.row_factory = aiosqlite.Row
     await conn.execute("PRAGMA foreign_keys = ON")
+    await conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
@@ -598,6 +599,17 @@ async def _draft_reply(
     return fallback_text, "template"
 
 
+async def _claim_pending(
+    db: aiosqlite.Connection, order_id: str, status: str, reason: str | None, messages: list[dict[str, Any]]
+) -> bool:
+    """Atomic pending -> decided transition; False if another request already decided it."""
+    cur = await db.execute(
+        "UPDATE orders SET status = ?, reject_reason = ?, messages_json = ? WHERE id = ? AND status = 'pending_approval'",
+        (status, reason, json.dumps(messages), order_id),
+    )
+    return cur.rowcount == 1
+
+
 async def _send_bot_reply(order_id: str, channel: str, text: str) -> None:
     """MOCK: outbound WhatsApp/chat reply. Real integration goes here later."""
     logger.info("bot_reply channel=%s order_id=%s text=%s", channel, order_id, text)
@@ -658,15 +670,7 @@ async def approve_order(order_id: str) -> Any:
                 )
             stock_snapshot[line["sku"]] = prod
 
-        # Deduct stock
-        for line in lines:
-            prod = stock_snapshot[line["sku"]]
-            new_stock = int(prod["stock"]) - int(line["quantity"])
-            await db.execute(
-                "UPDATE inventory SET stock = ? WHERE sku = ?", (new_stock, line["sku"])
-            )
-
-        # Bot notify (LLM draft, template fallback) + persist message
+        # LLM draft runs BEFORE any write so no write-lock is held during the slow call
         template_text = (
             f"Pesanan {order_id} sudah dikonfirmasi pemilik toko. "
             f"Total {_format_rupiah(int(order['total_price']))}, invoice segera kami kirim. Terima kasih, Kak!"
@@ -674,10 +678,25 @@ async def approve_order(order_id: str) -> Any:
         notify_text, drafted_by = await _draft_reply(db, order, "approved", template_text)
         new_messages = _bot_notify(order, notify_text, at, drafted_by)
 
-        await db.execute(
-            "UPDATE orders SET status = ?, messages_json = ? WHERE id = ?",
-            ("approved", json.dumps(new_messages), order_id),
-        )
+        claimed = await _claim_pending(db, order_id, "approved", None, new_messages)
+        if not claimed:
+            return typed_failure("ORDER_NOT_PENDING", "Pesanan ini sudah diproses sebelumnya.", "approve_order", order_id)
+
+        # Deduct stock atomically (stock may have changed while the LLM was drafting)
+        for line in lines:
+            cur = await db.execute(
+                "UPDATE inventory SET stock = stock - ? WHERE sku = ? AND stock >= ?",
+                (int(line["quantity"]), line["sku"], int(line["quantity"])),
+            )
+            if cur.rowcount == 0:
+                await db.rollback()
+                return typed_failure(
+                    "INSUFFICIENT_STOCK",
+                    f"Stok {stock_snapshot[line['sku']]['name']} tidak cukup lagi untuk pesanan ini.",
+                    "check_stock",
+                    order_id,
+                    sku=line["sku"],
+                )
 
         # Audit log (3 entries: human approve, agent stock deduct, agent notify)
         await _insert_audit(db, order_id, "human", "APPROVE_ORDER", "pending_approval", "approved", at)
@@ -720,10 +739,9 @@ async def reject_order(order_id: str, payload: RejectPayload) -> Any:
         notify_text, drafted_by = await _draft_reply(db, order, "rejected", template_text, payload.reason)
         new_messages = _bot_notify(order, notify_text, at, drafted_by)
 
-        await db.execute(
-            "UPDATE orders SET status = ?, reject_reason = ?, messages_json = ? WHERE id = ?",
-            ("rejected", payload.reason, json.dumps(new_messages), order_id),
-        )
+        claimed = await _claim_pending(db, order_id, "rejected", payload.reason, new_messages)
+        if not claimed:
+            return typed_failure("ORDER_NOT_PENDING", "Pesanan ini sudah diproses sebelumnya.", "reject_order", order_id)
 
         await _insert_audit(db, order_id, "human", "REJECT_ORDER", "pending_approval", "rejected", at, note=payload.reason)
         await _insert_audit(db, order_id, "agent", "NOTIFY_CUSTOMER", drafted_by, "sent", at, note=notify_text)

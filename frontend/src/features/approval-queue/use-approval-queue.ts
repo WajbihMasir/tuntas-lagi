@@ -53,32 +53,36 @@ export function useApprovalQueue() {
     setState((s) => ({ ...s, selectedId: id, lastFailure: null }));
   }, []);
 
-  const approve = useCallback(
-    async (id: string) => {
-      const result = await approveOrderApi(id, selectedIdRef.current);
-      if (result.ok) {
-        setState(result.value);
-        toast.success(`${id} disetujui. Stok dipotong & notifikasi terkirim.`);
-      } else {
+  const runDecision = useCallback(
+    async (id: string, call: () => ReturnType<typeof approveOrderApi>, successText: string): Promise<boolean> => {
+      try {
+        const result = await call();
+        if (result.ok) {
+          setState(result.value);
+          toast.success(successText);
+          return true;
+        }
         setState((s) => ({ ...s, lastFailure: result.error }));
         toast.error(`${result.error.code}: ${result.error.message}`);
+        return false;
+      } catch (err) {
+        toast.error(`NETWORK_ERROR: ${errorText(err, "DECISION_FAILED")} (${id})`);
+        return false;
       }
     },
     [],
   );
 
+  const approve = useCallback(
+    (id: string) =>
+      runDecision(id, () => approveOrderApi(id, selectedIdRef.current), `${id} disetujui. Stok dipotong & notifikasi terkirim.`),
+    [runDecision],
+  );
+
   const reject = useCallback(
-    async (id: string, reason: string) => {
-      const result = await rejectOrderApi(id, reason, selectedIdRef.current);
-      if (result.ok) {
-        setState(result.value);
-        toast.success(`${id} dibatalkan. Customer sudah diberi tahu.`);
-      } else {
-        setState((s) => ({ ...s, lastFailure: result.error }));
-        toast.error(`${result.error.code}: ${result.error.message}`);
-      }
-    },
-    [],
+    (id: string, reason: string) =>
+      runDecision(id, () => rejectOrderApi(id, reason, selectedIdRef.current), `${id} dibatalkan. Customer sudah diberi tahu.`),
+    [runDecision],
   );
 
   const simulateInbound = useCallback(

@@ -13,8 +13,8 @@ type OrderDecisionCardProps = {
   order: Order;
   inventory: Inventory;
   failure: ActionFailure | null;
-  onApprove: (id: string) => void;
-  onReject: (id: string, reason: string) => void;
+  onApprove: (id: string) => Promise<boolean>;
+  onReject: (id: string, reason: string) => Promise<boolean>;
 };
 
 function FailureNotice({ failure }: { failure: ActionFailure }) {
@@ -28,10 +28,17 @@ function FailureNotice({ failure }: { failure: ActionFailure }) {
 
 export function OrderDecisionCard({ order, inventory, failure, onApprove, onReject }: OrderDecisionCardProps) {
   const [rejecting, setRejecting] = useState(false);
+  const [busy, setBusy] = useState(false);
   const pending = order.status === "pending_approval";
+  async function decide(run: () => Promise<boolean>) {
+    setBusy(true);
+    const ok = await run();
+    setBusy(false);
+    if (ok) setRejecting(false);
+  }
   const actions = rejecting
-    ? <RejectReasonForm onCancel={() => setRejecting(false)} onConfirm={(reason) => { onReject(order.id, reason); setRejecting(false); }} />
-    : <DecisionActions onApprove={() => onApprove(order.id)} onReject={() => setRejecting(true)} />;
+    ? <RejectReasonForm busy={busy} onCancel={() => setRejecting(false)} onConfirm={(reason) => void decide(() => onReject(order.id, reason))} />
+    : <DecisionActions busy={busy} onApprove={() => void decide(() => onApprove(order.id))} onReject={() => setRejecting(true)} />;
   return (
     <GoldCard
       testId={APPROVAL.decisionCard}
